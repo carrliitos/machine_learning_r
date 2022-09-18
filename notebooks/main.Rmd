@@ -1,7 +1,7 @@
 ---
-title: "Project Name"
+title: "Machine Learning Study"
 output: 
-  html_notebook:
+  html_document:
     code_folding: show
     df_print: paged
     toc: TRUE
@@ -23,4 +23,7 @@ cat(chunks, sep = "\n")
 ```
 
 # Project Overview
-Description goes here.
+Machine Learning with `glmnet`.
+
+```{r child = "00_mlr.Rmd"}
+```
