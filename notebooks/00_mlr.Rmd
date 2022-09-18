@@ -1,0 +1,408 @@
+---
+title: "Open Data Science Conference: Machine Learning in R"
+author: "Benzon Carlitos Salazar"
+date: "September 17, 2022"
+output: 
+  html_document:
+    theme: "cosmo"
+    toc: true
+    toc_float: true
+bibliography: references.bib
+---
+
+```{r setup}
+library(magrittr)
+# rmarkdown::render("notebooks/00_mlr.Rmd")
+```
+
+# Supervised Learning
+
+Some function were x = input and y = output
+
+$$
+Y = f(X)
+$$
+
+Method we'll be learning: *Penalized linear regression* and *boosted trees*.
+These cover a good 95+% of what we want to do in Machine Learning.
+
+Given linear function, such as the `slope-intercept form`,
+$$
+y = f(x) = mx + b
+$$
+where `m` is the slope, and `b` is the `y-intercept`, we can calculate the 
+equation of a straight line.
+
+What happens if we have multiple `x`'s?
+Then,
+$$
+y = f(x) = m_1x_1 + m_2x_2 + m_3x_3 + \ldots + m_nx_n + b
+$$
+where `n` is the amount of `x` input variables we have, each with their own 
+slopes.
+
+Additionally, `m` are called *gradient*, or statisticians call them 
+*coefficients*, or folks in the ML world calls them *weights*, or they can also 
+be referred to as *betas*. In which case, the equation can be like this,
+$$
+y = f(x) = b_1x_1 + b_2x_2 + b_3x_3 + \ldots + b_nx_n + a
+$$
+
+Re-writing our equation in matrix-notation,
+$$
+Y = \beta X
+$$
+
+This is a more compact form of the previous equation.
+
+The whole goal is, we have a our input variable, `X`, and our output variable `Y`. 
+And we want to find the values for the *betas*, $\beta$, that best associate 
+`X` to `Y`, old-school linear regression, or best-fit line. So, the whole idea 
+is to solve for *beta*, $\beta$.
+
+The solution for $\beta$ is, in closed-form,
+$$
+\hat{\beta} = (X^TX)^{-1}X^TY
+$$
+
+## Programming this sucker
+
+Download the Manhattan datasets
+
+```{r datasets, eval = FALSE}
+# install.packages(c("glmnet", "useful", "coefplot"))
+
+# Test Data
+utils::download.file(
+	"https://query.data.world/s/tkfdrcapfsw7ihodbjzsdywz7povce",
+	destfile = file.path(here::here("data-raw"), "manhattan_test.rds"),
+	mode = "w"
+)
+
+# Train Data
+utils::download.file(
+	"https://query.data.world/s/4tjm263dwjq5knfs5upekzlmzc6oa2",
+	destfile = file.path(here::here("data-raw"), "manhattan_train.rds"),
+	mode = "w"
+)
+
+# Validate Data
+utils::download.file(
+	"https://query.data.world/s/4tfwbez3ul5ap7apg2ffgltfpzmifm",
+	destfile = file.path(here::here("data-raw"), "manhattan_validate.rds"),
+	mode = "w"
+)
+```
+
+### Test data
+
+Some notes:
+
+1. `TotalValue` column is how much the land is worth for purchase.
+2. `FireService`, what type of fire service does the lang have?
+3. `ZoneDistrictx`, these are zoning districts
+4. `Class` which says things like `Retail`, `Public`, `Office`, etc.
+5. `LandUse`, which is about similar to the `Class` variable.
+
+It is also important to note that the `*Area` columns may give us some 
+collinearity, meaning these columns may be highly correlated.
+
+```{r test_data}
+train <- readRDS(here::here("data-raw", "manhattan_train.rds"))
+
+colnames(train)
+
+# Just looking at the first 10 columns
+train %>%
+dplyr::select(1:10) %>%
+head(n = 5) %>%
+gt::gt()
+```
+
+## Goal with the model
+
+The goal with this model is to explain the total value of a piece of land, based 
+on all of the other input predictors.
+
+And we define this relationship with `elastic net interface`.
+
+We have the `value_formula`, which says that we're going to take `TotalValue`, 
+and model it using the input variables. And this is how we are defining our 
+linear relationship.
+
+In R, a formula is so: `output_variable ~ input_variables - 1`.
+
+We do `- 1` because we're about to build matrices, and without the `- 1`, we're 
+getting an intercept column, which is great, however, the function we are about 
+to use will give us an intercept automatically.
+
+## Coefficient Plot
+
+```{r value_formula}
+value_formula <- 
+	TotalValue ~ FireService +  ZoneDist1 + ZoneDist2 + Class + LandUse + 
+	OwnerType + LotArea + BldgArea + ComArea + ResArea + OfficeArea + 
+	RetailArea + GarageArea + FactryArea + NumBldgs + NumFloors + UnitsRes + 
+	UnitsTotal + LotFront + LotDepth + BldgFront + BldgDepth + LotType + 
+	Landmark + BuiltFAR + Built + HistoricDistrict - 1
+```
+
+Using the `stats::lm()`, we can get a linear model, which is kinda ugly.
+
+```{r lm}
+value1 <- stats::lm(value_formula, data = train)
+value1
+summary(value1)
+coefplot::coefplot(value1, sort="magnitude")
+```
+
+The plot shows each coefficient, multiplier, or weight on our variable, which 
+is represented by the dot. The "wings" represents the confidence intervals.
+
+Traditionally, the confidence intervals means that if you repeat the test 100 
+times, the true value will fall in this confidence interval 95 times.
+
+The zero line means that if the *x* variable falls in that line, it had 
+**zero effect in your outcome variable**. The individual dot is our estimate for 
+the weight for the coefficient. The confidence interval says what it's likely 
+to be. 
+
+One note is, that if the confidence interval includes zero, it means the effect 
+of that variable on the outcome is effectively zero, or statistially not 
+significant. 
+
+`p-values` we designed by RA Fisher back when he did not have computers to work 
+with. And now that we do, we can basically avoid the `p-values`.
+
+From the coefficient plot, we can simply look at the varibles that intersects 
+zero, and just remove them. However, that changes things and is considered 
+`p-hacking`, which is a misuse of data analysis to find patterns in data that 
+can be presented as statistically significant when in fact there is no real 
+underlying effect ([source](https://scienceinthenewsroom.org/resources/statistical-p-hacking-explained/)).
+
+Now, why do we have such incredibly large confidence intervals, and why do we 
+have such large coefficients? Because we are **overfitting**.
+
+We have, like, 90 different variables in our formula acting on about 32,000 rows 
+of data, the *curse of dimensionality* -- too much data. If we don't do any 
+feature engineering/feature selection, we're gonna get overfitting.
+
+***Extremely large coefficients, and extermely wide confidence intervals are 
+indicative of overfitting.***
+
+We deal with this through *variable selection*, via **regularization**, also 
+known as **shrinkage**, or **penalization**.
+
+## Variable Selection via Elastic Net
+
+The goal is to minimize the cost function, which is made up of some objective, 
+plus a penalty term. And our penalty terms are designed that if we have large 
+coefficients, we get a large penalty.
+
+So, our goal is to fit the model by solving the Elastic Net equation. For 
+further reading, check out [@elastic-net].
+
+With `stats::lm()`, all we needed was to provide our formula and our data, then 
+we fit our model. With `glmnet`, we are meant to pre-build the X input matrix 
+and Y output matrix.
+
+First, we build our X input matrix.
+
+Here, we have `contrast = FALSE`, means that if we have a factor variable, like 
+we do with our `value_formula`, with 5 levels, you will get 4 dummy variables 
+back. Because if we do all 5 levels, you are guaranteed to get collinearity with 
+the intercept. With `glmnet`, we don't care about collinearity anymore.
+
+Then, `sparse = TRUE` means build a sparse matrix. A sparse matrix is a better 
+way of storing data, takes up less space in memory, and computes faster.
+
+```{r build_x}
+landX_train <- useful::build.x(value_formula, data = train, 
+							   contrasts = FALSE, sparse = TRUE)
+
+head(as.matrix(landX_train))
+```
+
+Next, we build our Y output matrix.
+
+This one does not have any other arguments. The three common mistakes:
+
+1. Using `useful::build.x()` when `useful::build.y()` was what was meant to be 
+used.
+2. Using the wrong name of the variable.
+3. Giving extra argument to `useful::build.y()`
+
+```{r build_y}
+landY_train <- useful::build.y(value_formula, data = train)
+
+head(as.matrix(landY_train))
+```
+
+## Fitting our model
+
+We're setting `family = "gaussian"` to do a Gaussian linear regression because 
+we are doing a standard linear regression.
+
+```{r glmnet_2}
+model_2 <- 
+	glmnet::glmnet(x = landX_train, y = landY_train, family = "gaussian")
+```
+
+The `model_2` just fit about 100 models, which were the tuning parameters from 
+the lambda term, $\lambda$, in the elastic net regularization method. 
+
+Depending on the value of the lambda, we either get a lot of zeros or a lot of 
+non-zeros. Looking at the beta matrix of the `model_2`, we will see that as we 
+get to smaller lambdas, we're getting more coefficients with values. And the 
+whole idea is that within a given lambda is one model, and if the value is zero, 
+then the variable is not selected. And if it was non-zero, then the variable was 
+selected and was allowed to stay in the model.
+
+```{r plot_model}
+plot(model_2, xvar = "lambda", label = TRUE)
+```
+
+Each line in the plot represents a different coefficient over its lifetime.
+
+The x-axis lambda on the log scale, and we can see that if lambda is small, all 
+the coefficients are in the model. As lambda gets bigger, the coefficients 
+shrink and eventually some of them go to zero, and as you move along, they all 
+approach zero.
+
+The top of the x-axis shows that for a given value of lambda, how many 
+coefficients/variables are left in.
+
+Testing out `coefplot::coefpath()` on our model gives as an interactive version 
+of the plot with proper labels.
+
+```{r coef_path}
+coefplot::coefpath(model_2)
+```
+
+Looking for the $R^2$, puts as in the danger of overfitting. Instead, we do 
+**cross-validation**, which is some metric of how good or our model is. 
+
+## Finding out the optimal $\lambda$
+
+Cross-validation has been the gold standard for model validation. It is 
+basically a resampling method that uses different portions of the data to test 
+and train a model on different iterations.
+
+We now are doing cross-validations on 5 folds.
+
+```{r cross_validation}
+cross_validation_data <- 
+	glmnet::cv.glmnet(x = landX_train, y = landY_train, 
+					  family = "gaussian", nfolds = 5)
+```
+
+After fitting our model, we plot. And we see that we get $\log{\lambda}$ for 
+the x-axis, and a mean-squared error in the y-axis.
+
+```{r cv_plot}
+plot(cross_validation_data)
+```
+
+Each one represents our lambda, the dot represents the mean cross-validation 
+error, and the wings represent the confidence. And with 5 folds, we have 5 
+measurements, with 10 folds, you get 10 measurements.
+
+The dotted lines around 12 represents the value of lambda that results in 
+absolute least error, which is the best your model can do, or the best-fit 
+model.
+
+Checking out to see the `coefplot::coefpath()` and `coefplot::coefplot()` of 
+the cross-validated model.
+
+```{r coefpath_cv}
+coefplot::coefpath(cross_validation_data)
+
+coefplot::coefplot(cross_validation_data, 
+				  sort = "magnitude", 
+				  lambda = "lambda.1se")
+```
+
+This gives us a much smaller coefficient plot, and fewer varibles were selected.
+
+**The `glmnet` is very interpretable.**
+
+## Lasso vs Ridge
+
+We've been using the lasso so far, and next we do the ridge.
+
+Lasso is good for variable selection, and Ridge is good for dealing with highly 
+correlated variables.
+
+So, if you want to get rid of variables, use lasso, if you want to deal with 
+correlation, use ridge.
+
+## Ridge
+
+Using the same `glmnet::cv.glmnet()`, we set `alpha = 0` which uses the ridge.
+And by default `alpha = 1`, which is the lasso.
+
+```{r ridge}
+cross_validation_data_ridge <-
+	glmnet::cv.glmnet(x = landX_train, y = landY_train, 
+					  family = "gaussian", nfolds = 5,
+					  alpha = 0)
+```
+
+Visualizing the ridge cross-validation, we see that the variable asymptotically 
+reaches zero, but never truly getting there.
+
+```{r ridge_plot}
+plot(cross_validation_data_ridge)
+
+coefplot::coefpath(cross_validation_data_ridge)
+
+coefplot::coefplot(cross_validation_data_ridge, 
+									 sort = "magnitude", 
+									 lambda = "lambda.1se")
+```
+
+With the `coefplot::coefplot()`, all the variables are still in the model and no 
+variable selection was performed. It performed shrinkage, but it did not do 
+variable selection.
+
+We don't necessarily need to chose between lasso or ridge, we can change our 
+`alpha` to a range between 0 and 1 to do some part lasso, some part ridge. For 
+example, `alpha = 0.6` is 60% lasso and 40% ridge, which is called the 
+`elastic net`.
+
+```{r elastic_net}
+cv_elastic_net <- 
+	glmnet::cv.glmnet(x = landX_train, y = landY_train, 
+					  family = "gaussian", nfolds = 5,
+					  alpha = 0.6)
+```
+
+Looking at the plots, we see the following:
+
+```{r elastic_net_plots}
+plot(cv_elastic_net)
+coefplot::coefpath(cv_elastic_net)
+coefplot::coefplot(cv_elastic_net, sort = "magnitude", lambda = "lambda.1se")
+```
+
+## Testing
+
+We now do some predictions on our test dataset. We do this by building our X and 
+Y matrices again.
+
+```{r testing}
+test <- readRDS(here::here("data-raw", "manhattan_test.rds"))
+
+landX_test <- 
+	useful::build.x(value_formula, data = test,
+		contrasts = FALSE, sparse = TRUE)
+
+value_predictions <- 
+	stats::predict(cv_elastic_net, newx = landX_test, s = "lambda.1se")
+
+head(value_predictions)
+```
+
+We see the first five values of our value predictions.
+
+# References
