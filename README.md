@@ -1,4 +1,10 @@
-Introduce the purpose of the project here.
+# Machine Learning in R
+
+A self-study notebook for the *penalized linear regression* model using *elastic nets* for the penalization or 
+regularization.
+
+YouTube video can be found here:
+[Machine Learning in R Part 1: Jared Lander](https://youtu.be/WWuW4kkI_SA)
 
 ## Execution
 To execute, run the below commands:
